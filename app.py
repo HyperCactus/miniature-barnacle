@@ -2,7 +2,7 @@ import streamlit as st
 import torch
 from src.document_parser import parse_document
 from src.tts_gen_chaterbox_local import ChatterboxLocal
-from src.doc_reader import text2audio
+from src.doc_reader import text2audio, clean_text_with_llm
 from src.voice_manager import VoiceManager
 
 # Configure page
@@ -121,6 +121,9 @@ def main():
                     if not text.strip():
                         st.error("No text found in the document!")
                     else:
+                        with st.spinner("Cleaning text with LLM..."):
+                            text = clean_text_with_llm(text)
+                            st.success("✓ Text cleaned successfully!")
                         # Generate audio
                         voice_path = st.session_state.voice_manager.get_voice_path(selected_voice)
                         
