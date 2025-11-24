@@ -7,71 +7,161 @@ import os
 from typing import Optional
 import tempfile
 from pydub import AudioSegment
-import dspy
-import lmstudio as lms
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import gc
 
-class CleanText(dspy.Signature):
-    """Fix any obvious issues in the text and write everything out exactly how it should be pronounced.
-    For example, 22 + 1/40 should be written as "twenty two plus one over forty".
-    Exclude any text that should not be spoken such as image captions, references etc.
-    """
-    original_text: str = dspy.InputField()
-    cleaned_text: str = dspy.OutputField()
+# System prompt from the original CleanText docstring
+SYSTEM_PROMPT = """Fix any obvious issues in the text and write everything out exactly how it should be pronounced.
+For example, 22 + 1/40 should be written as "twenty two plus one over forty".
+Exclude any text that should not be spoken such as image captions, references etc."""
 
-class LLMConfig():
-    def __init__(
-        self, model_name: str, provider: str, api_key: str = "not needed", 
-        temperature: float = 0.2, context_length: int = 2048, base_url: str = None
-        ):
+class QwenTextCleaner:
+    def __init__(self, model_name: str = "Qwen/Qwen3-4B-Instruct-2507"):
         self.model_name = model_name
-        self.provider = provider
-        self.api_key = api_key
-        self.temperature = temperature
-        self.context_length = context_length
-        self.base_url = base_url
-        self.lm_studio_model = None
-        
-        self.load()
-        
+        self.model = None
+        self.tokenizer = None
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.is_loaded = False
+    
     def load(self):
-        if self.provider == "lm_studio":
-            try:
-                self.lm_studio_model = lms.llm(self.model_name, ttl=3600*10)
-            except Exception as e:
-                print(f"Error loading lm_studio model: {e}")
-        
-        self.lm = dspy.LM(model=f"{self.provider}/{self.model_name}", api_key=self.api_key, temperature=self.temperature, 
-                          max_tokens=self.context_length, base_url=self.base_url)
+        """Load the Qwen model and tokenizer"""
+        if not self.is_loaded:
+            print(f"Loading Qwen model: {self.model_name}")
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                self.model_name,
+                trust_remote_code=True
+            )
+            self.model = AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True
+            )
+            self.is_loaded = True
     
     def unload(self):
-        if self.provider == "lm_studio":
-            self.lm_studio_model.unload()
-
-def clean_text_with_llm(text: str, lm_config) -> str:
-    """Uses an LLM to clean text and prepare it for TTS processing."""
-    lm_config.load()
-    dspy.configure(lm=lm_config.lm)
-    cleaner = dspy.Predict(CleanText)
-    chunks = chunk_text(text, max_length=1000)
-    cleaned_chunks = []
-    for chunk in chunks:
-        cleaned_chunk = cleaner(original_text=chunk).cleaned_text
-        cleaned_chunks.append(cleaned_chunk)
+        """Unload the model from GPU memory"""
+        if self.is_loaded:
+            print("Unloading Qwen model from GPU...")
+            del self.model
+            self.model = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            self.is_loaded = False
     
-    lm_config.unload()
-    return " ".join(cleaned_chunks)
+    def clean_chunk(self, text_chunk: str) -> str:
+        """Clean a single text chunk using the Qwen model"""
+        if not self.is_loaded:
+            self.load()
+        
+        # Format the prompt for the model
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text_chunk}
+        ]
+        
+        # Format the input for the model
+        formatted_input = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+        
+        # Tokenize and generate
+        inputs = self.tokenizer(formatted_input, return_tensors="pt").to(self.device)
+        
+        with torch.no_grad():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=512,
+                temperature=0.2,
+                do_sample=True,
+            )
+        
+        # Decode the output
+        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        
+        # Extract just the assistant's response
+        # The response includes the entire conversation, so we need to extract only the assistant part
+        # This is a simplified approach - in production you might want more sophisticated parsing
+        if "assistant" in response:
+            # Extract the assistant's response
+            assistant_response = response.split("assistant")[-1].strip()
+            # Clean up any remaining special tokens or formatting
+            assistant_response = assistant_response.replace("<|endoftext|>", "").strip()
+        else:
+            # Fallback: if we can't parse properly, return the original text
+            assistant_response = text_chunk
+        
+        return assistant_response
+
+def clean_text_with_llm(text: str, progress_callback: Optional[callable] = None) -> str:
+    """Uses Qwen model directly from Hugging Face to clean text for TTS processing."""
+    cleaner = QwenTextCleaner()
+    
+    try:
+        cleaner.load()
+        chunks = chunk_text(text, max_length=1000)
+        cleaned_chunks = []
+        
+        # Process chunks with progress updates
+        for i, chunk in enumerate(chunks):
+            if progress_callback:
+                progress_callback((i + 1) / len(chunks))
+        
+        cleaned_chunk = cleaner.clean_chunk(chunk)
+        cleaned_chunks.append(cleaned_chunk)
+        
+        # Final progress update
+        if progress_callback:
+            progress_callback(1.0)
+        
+        return " ".join(cleaned_chunks)
+    
+    finally:
+        cleaner.unload()
 
 def chunk_text(text: str, max_length: int = 200) -> list:
+    """Split text into chunks for processing by the LLM"""
     chunks = []
-    for s in text.split('. '):
-        s += '.'
-        if len(s) <= max_length:
-            chunks.append(s)
+    sentences = text.split('. ')
+    
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+            
+        # Add period back if it was split
+        if not sentence.endswith('.'):
+            sentence += '.'
+        
+        if len(sentence) <= max_length:
+            chunks.append(sentence)
         else:
-            words = s.split(' ')
-            for i in range(0, len(words), max_length // 5):
-                chunk = ' '.join(words[i:i + max_length // 5])
-                chunks.append(chunk)
+            # If sentence is too long, split by words
+            words = sentence.split(' ')
+            current_chunk = []
+            current_length = 0
+            
+            for word in words:
+                word_length = len(word) + 1  # +1 for space
+                
+                if current_length + word_length <= max_length:
+                    current_chunk.append(word)
+                    current_length += word_length
+                else:
+                    # Add current chunk
+                    if current_chunk:
+                        chunks.append(' '.join(current_chunk))
+                        current_chunk = [word]
+                        current_length = word_length
+            
+            # Add any remaining words
+            if current_chunk:
+                chunks.append(' '.join(current_chunk))
+    
     return chunks
 
 def text2audio(
@@ -104,12 +194,12 @@ def text2audio(
         # Combine chunk audio files into one
         combined = AudioSegment.empty()
         for chunk_file in chunk_files:
-            chunk_audio = AudioSegment.from_wav(chunk_file)
-            combined += chunk_audio + AudioSegment.silent(duration=500)  # Add 0.5s silence between chunks
+                chunk_audio = AudioSegment.from_wav(chunk_file)
+                combined += chunk_audio + AudioSegment.silent(duration=500)  # Add 0.5s silence between chunks
         
         # Export combined audio
         combined.export(out_path, format="wav")
-        
+    
     return out_path
 
 
