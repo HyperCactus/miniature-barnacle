@@ -2,8 +2,10 @@ import streamlit as st
 import torch
 from src.document_parser import parse_document
 from src.tts_gen_chaterbox_local import ChatterboxLocal
-from src.doc_reader import text2audio, clean_text_with_llm
+from src.doc_reader import text2audio, clean_text_with_llm, LLMConfig
 from src.voice_manager import VoiceManager
+import tempfile
+import os
 
 # Configure page
 st.set_page_config(
@@ -22,6 +24,10 @@ if 'audio_generated' not in st.session_state:
     st.session_state.audio_generated = False
 if 'audio_path' not in st.session_state:
     st.session_state.audio_path = None
+if 'lm_config' not in st.session_state:
+    st.session_state.lm_config = lm_config = LLMConfig(
+        "qwen/qwen3-4b-2507", "lm_studio", base_url='http://localhost:1234/v1/'
+    )
 
 def initialize_tts():
     """Initialize TTS engine if not already done"""
@@ -122,7 +128,7 @@ def main():
                         st.error("No text found in the document!")
                     else:
                         with st.spinner("Cleaning text with LLM..."):
-                            text = clean_text_with_llm(text)
+                            text = clean_text_with_llm(text, st.session_state.lm_config)
                             st.success("✓ Text cleaned successfully!")
                         # Generate audio
                         voice_path = st.session_state.voice_manager.get_voice_path(selected_voice)
@@ -134,12 +140,13 @@ def main():
                         with st.spinner("🎵 Generating audio... This may take a while for long documents."):
                             progress_bar = st.progress(0.0)
                             
-                            audio_path = st.session_state.tts_engine(
-                                text,
-                                f"generated_audio/{uploaded_file.name.rsplit('.', 1)[0]}_audio.wav",
-                                ref_audio_path=voice_path,
-                                exaggeration=exaggeration,
-                                progress_callback=lambda p: progress_bar.progress(p),
+                            with tempfile.TemporaryDirectory() as temp_dir:
+                                audio_path = st.session_state.tts_engine(
+                                    text,
+                                    os.path.join(temp_dir, f"{uploaded_file.name.rsplit('.', 1)[0]}_audio.wav"),
+                                    ref_audio_path=voice_path,
+                                    exaggeration=exaggeration,
+                                    progress_callback=lambda p: progress_bar.progress(p),
                                 tts=tts
                             )
                             

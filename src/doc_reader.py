@@ -32,8 +32,6 @@ class LLMConfig():
         self.lm_studio_model = None
         
         self.load()
-        self.lm = dspy.LM(model=f"{self.provider}/{self.model_name}", api_key=self.api_key, temperature=self.temperature, 
-                          max_tokens=self.context_length, base_url=self.base_url)
         
     def load(self):
         if self.provider == "lm_studio":
@@ -41,14 +39,17 @@ class LLMConfig():
                 self.lm_studio_model = lms.llm(self.model_name, ttl=3600*10)
             except Exception as e:
                 print(f"Error loading lm_studio model: {e}")
+        
+        self.lm = dspy.LM(model=f"{self.provider}/{self.model_name}", api_key=self.api_key, temperature=self.temperature, 
+                          max_tokens=self.context_length, base_url=self.base_url)
     
     def unload(self):
         if self.provider == "lm_studio":
             self.lm_studio_model.unload()
 
-def clean_text_with_llm(text: str) -> str:
+def clean_text_with_llm(text: str, lm_config) -> str:
     """Uses an LLM to clean text and prepare it for TTS processing."""
-    lm_config = LLMConfig("qwen/qwen3-4b-2507", "lm_studio", base_url='http://localhost:1234/v1/')
+    lm_config.load()
     dspy.configure(lm=lm_config.lm)
     cleaner = dspy.Predict(CleanText)
     chunks = chunk_text(text, max_length=1000)
