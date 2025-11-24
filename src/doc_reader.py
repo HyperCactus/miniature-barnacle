@@ -148,7 +148,12 @@ def chunk_text(text: str, max_length: int = 200) -> list:
         if not sentence.endswith('.'):
             sentence += '.'
         
-        if len(sentence) <= max_length:
+        if len(sentence) <= max_length: # If sentence fits, try to combine with next sentences
+            if i < len(sentences) - 1:
+                for k in range(i, len(sentences)-1):
+                    if len(sentence) + len(sentences[k+1]) + 1 <= max_length:
+                        sentence += ' ' + sentences[k+1].strip()
+                        
             chunks.append(sentence)
         else:
             # If sentence is too long, split by words
