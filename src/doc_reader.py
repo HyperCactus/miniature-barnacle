@@ -9,12 +9,14 @@ import tempfile
 from pydub import AudioSegment
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import BitsAndBytesConfig
 import gc
 
 # System prompt from the original CleanText docstring
 SYSTEM_PROMPT = """Fix any obvious issues in the text and write everything out exactly how it should be pronounced.
 For example, 22 + 1/40 should be written as "twenty two plus one over forty".
-Exclude any text that should not be spoken such as image captions, references etc."""
+Exclude any text that should not be spoken such as image captions, references etc.
+Reply only with the exact text to be spoken, do not include any additional commentary."""
 
 class QwenTextCleaner:
     def __init__(self, model_name: str = "Qwen/Qwen3-4B-Instruct-2507"):
@@ -25,16 +27,25 @@ class QwenTextCleaner:
         self.is_loaded = False
     
     def load(self):
-        """Load the Qwen model and tokenizer"""
+        """Load the Qwen model and tokenizer with 8-bit quantization"""
         if not self.is_loaded:
             print(f"Loading Qwen model: {self.model_name}")
+            
+            # Configure 8-bit quantization to reduce memory usage
+            quantization_config = BitsAndBytesConfig(
+                load_in_8bit=True,
+                bnb_8bit_compute_dtype=torch.float16,
+                bnb_8bit_use_double_quant=True,
+                bnb_8bit_quant_type="nf8"
+            )
+            
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_name,
                 trust_remote_code=True
             )
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch.float16,
+                quantization_config=quantization_config,
                 device_map="auto",
                 trust_remote_code=True
             )

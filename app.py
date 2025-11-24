@@ -108,6 +108,9 @@ def main():
     with col2:
         st.header("🎵 Generate Audio")
         
+        # Create a container for status messages that can be cleared
+        status_container = st.container()
+        
         if uploaded_file and selected_voice:
             if st.button("🎙️ Convert to Audio", type="primary", use_container_width=True):
                 try:
@@ -115,47 +118,68 @@ def main():
                     initialize_tts()
                     
                     # Parse document
-                    with st.spinner("📖 Extracting text from document..."):
-                        text = parse_document(uploaded_file)
-                        word_count = len(text.split())
-                        st.info(f"Extracted {word_count} words")
+                    with status_container:
+                        with st.spinner("📖 Extracting text from document..."):
+                            text = parse_document(uploaded_file)
+                            word_count = len(text.split())
+                            st.info(f"Extracted {word_count} words")
                     
                     if not text.strip():
-                        st.error("No text found in the document!")
+                        with status_container:
+                            st.error("No text found in the document!")
                     else:
-                        with st.spinner("Cleaning text with LLM..."):
-                            llm_progress_bar = st.progress(0.0)
-                            text = clean_text_with_llm(text, progress_callback=lambda p: llm_progress_bar.progress(p))
-                            llm_progress_bar.progress(1.0)
-                            st.success("✓ Text cleaned successfully!")
+                        # Load LLM model and clean text
+                        with status_container:
+                            with st.spinner("🔄 Loading LLM into memory..."):
+                                # Import the cleaner class to preload the model
+                                from src.doc_reader import QwenTextCleaner
+                                cleaner = QwenTextCleaner()
+                                cleaner.load()
+                            
+                            with st.spinner("🧠 Cleaning text with LLM..."):
+                                llm_progress_bar = st.progress(0.0)
+                                # Clean text with the preloaded model
+                                chunks = text.split('. ')
+                                cleaned_chunks = []
+                                for i, chunk in enumerate(chunks):
+                                    if chunk.strip():
+                                        cleaned_chunk = cleaner.clean_chunk(chunk)
+                                        cleaned_chunks.append(cleaned_chunk)
+                                    llm_progress_bar.progress((i + 1) / len(chunks))
+                                text = '. '.join(cleaned_chunks)
+                                llm_progress_bar.empty()  # Clear the progress bar
+                                st.success("✓ Text cleaned successfully!")
+                                cleaner.unload()  # Unload the LLM model to free memory
+                        
                         # Generate audio
                         voice_path = st.session_state.voice_manager.get_voice_path(selected_voice)
                         
-                        with st.spinner("Loading TTS model into memory (may take a few minutes)..."):
-                            tts = ChatterboxLocal(ref_audio_path=voice_path, exaggeration=exaggeration)
-                            tts.load()
+                        with status_container:
+                            with st.spinner("🔄 Loading TTS model into memory..."):
+                                tts = ChatterboxLocal(ref_audio_path=voice_path, exaggeration=exaggeration)
+                                tts.load()
                         
-                        with st.spinner("🎵 Generating audio... This may take a while for long documents."):
-                            progress_bar = st.progress(0.0)
-                            
-                            # Create a persistent directory for audio files
-                            os.makedirs("generated_audio", exist_ok=True)
-                            audio_path = os.path.join("generated_audio", f"{uploaded_file.name.rsplit('.', 1)[0]}_audio.wav")
-                            
-                            st.session_state.tts_engine(
-                                text,
-                                audio_path,
-                                ref_audio_path=voice_path,
-                                exaggeration=exaggeration,
-                                progress_callback=lambda p: progress_bar.progress(p),
-                                tts=tts
-                            )
-                            
-                            st.session_state.audio_path = audio_path
-                            st.session_state.audio_generated = True
-                            progress_bar.progress(1.0)
-                        
-                        st.success("✓ Audio generated successfully!")
+                        with status_container:
+                            with st.spinner("🎵 Generating audio... This may take a while for long documents."):
+                                progress_bar = st.progress(0.0)
+                                
+                                # Create a persistent directory for audio files
+                                os.makedirs("generated_audio", exist_ok=True)
+                                audio_path = os.path.join("generated_audio", f"{uploaded_file.name.rsplit('.', 1)[0]}_audio.wav")
+                                
+                                st.session_state.tts_engine(
+                                    text,
+                                    audio_path,
+                                    ref_audio_path=voice_path,
+                                    exaggeration=exaggeration,
+                                    progress_callback=lambda p: progress_bar.progress(p),
+                                    tts=tts
+                                )
+                                
+                                st.session_state.audio_path = audio_path
+                                st.session_state.audio_generated = True
+                                progress_bar.empty()  # Clear the progress bar
+                                st.success("✓ Audio generated successfully!")
                         
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
