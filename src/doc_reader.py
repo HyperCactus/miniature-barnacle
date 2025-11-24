@@ -139,7 +139,7 @@ def chunk_text(text: str, max_length: int = 200) -> list:
     chunks = []
     sentences = text.split('. ')
     
-    for sentence in sentences:
+    for i, sentence in enumerate(sentences):
         sentence = sentence.strip()
         if not sentence:
             continue

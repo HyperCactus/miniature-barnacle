@@ -31,17 +31,23 @@ class ChatterboxLocal():
             # If chatterbox supports kwargs like dtype, you could pass torch.float32 explicitly
             self.model = ChatterboxTTS.from_pretrained(device=self.device)
 
-    def generate(self, text: str, out_path: str, exaggeration: Optional[float] = None, ref_audio_path: Optional[os.PathLike] = None):
+    def generate(
+        self, text: str, out_path: str, 
+        exaggeration: Optional[float] = None, 
+        cfg_weight: Optional[float] = None,
+        ref_audio_path: Optional[os.PathLike] = None
+        ):
         self.load()
         # If there’s no ref, pass None so chatterbox skips voice cloning path
         ref = ref_audio_path or self.ref_audio_path
         exaggeration = exaggeration or self.exaggeration
+        cfg_weight = cfg_weight or self.cfg_weight
         if self.verbose:
             wav = self.model.generate(
                 text,
                 audio_prompt_path=ref,
                 exaggeration=exaggeration,
-                cfg_weight=self.cfg_weight,
+                cfg_weight=cfg_weight,
                 temperature=self.temperature
             )
         else:
@@ -53,7 +59,7 @@ class ChatterboxLocal():
                 try:
                     wav = self.model.generate(
                         text,
-                        audio_prompt_path=self.ref_audio_path,
+                        audio_prompt_path=ref,
                         exaggeration=self.exaggeration,
                         cfg_weight=self.cfg_weight,
                         temperature=self.temperature

@@ -144,9 +144,11 @@ class VoiceManager:
         Get list of available voice names.
         
         Returns:
-            List of voice names
+            List of voice names including "Model default" option
         """
-        return sorted(list(self.metadata.keys()))
+        voices = sorted(list(self.metadata.keys()))
+        # Add "Model default" at the beginning of the list
+        return ["Model default"] + voices
     
     def get_voice_path(self, name: str) -> Optional[str]:
         """
@@ -156,8 +158,12 @@ class VoiceManager:
             name: Name of the voice
             
         Returns:
-            Path to voice sample, or None if not found
+            Path to voice sample, or None if not found or if "Model default" is selected
         """
+        # Return None for "Model default" to indicate no voice sample should be used
+        if name == "Model default":
+            return None
+            
         if name in self.metadata:
             path = self.metadata[name]["path"]
             if os.path.exists(path):

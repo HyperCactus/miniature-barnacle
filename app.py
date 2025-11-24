@@ -47,10 +47,10 @@ def main():
             selected_voice = st.selectbox(
                 "Select Voice",
                 options=available_voices,
-                help="Choose a voice from your saved samples"
+                help="Choose a voice from your saved samples, or select 'Model default' for the default TTS voice"
             )
         else:
-            st.info("No voices available. Please add a voice sample below.")
+            st.info("No voices available. Please add a voice sample below or select 'Model default'.")
             selected_voice = None
         
         # Add new voice
@@ -80,6 +80,15 @@ def main():
             value=0.6,
             step=0.05,
             help="Controls the emotional intensity and expressiveness of the speech"
+        )
+        
+        cfg_weight = st.slider(
+            "CFG Weight",
+            min_value=0.1,
+            max_value=1.0,
+            value=0.5,
+            step=0.05,
+            help="Controls the classifier-free guidance weight for voice generation"
         )
         
         # GPU info
@@ -156,7 +165,8 @@ def main():
                         
                         with status_container:
                             with st.spinner("🔄 Loading TTS model into memory..."):
-                                tts = ChatterboxLocal(ref_audio_path=voice_path, exaggeration=exaggeration)
+                                # Pass None for ref_audio_path when using "Model default"
+                                tts = ChatterboxLocal(ref_audio_path=voice_path, exaggeration=exaggeration, cfg_weight=cfg_weight)
                                 tts.load()
                         
                         with status_container:
@@ -189,7 +199,7 @@ def main():
             if not uploaded_file:
                 st.info("👆 Please upload a document first")
             if not selected_voice:
-                st.info("👈 Please select or add a voice in the sidebar")
+                st.info("👈 Please select a voice in the sidebar")
     
     # Audio playback section
     if st.session_state.audio_generated and st.session_state.audio_path:
