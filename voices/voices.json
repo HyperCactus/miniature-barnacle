@@ -1,0 +1,7 @@
+{
+  "male voice": {
+    "path": "voices\\male_voice\\sample.wav",
+    "original_name": "sample.wav",
+    "dir": "voices\\male_voice"
+  }
+}

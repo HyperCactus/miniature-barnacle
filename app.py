@@ -118,9 +118,16 @@ def main():
         
         # GPU info
         if torch.cuda.is_available():
-            st.caption(f"✓ GPU: {torch.cuda.get_device_name(0)}")
+            gpu_name = torch.cuda.get_device_name(0)
+            total_memory = torch.cuda.get_device_properties(0).total_memory
+            total_memory_gb = total_memory / (1024 ** 3)
+            
+            if total_memory_gb >= 7.9:
+                st.success(f"✓ GPU: {gpu_name} ({total_memory_gb:.1f} GB)")
+            else:
+                st.warning(f"⚠ GPU: {gpu_name} ({total_memory_gb:.1f} GB) - Low VRAM, generation may be slow")
         else:
-            st.caption("⚠ Using CPU (slower)")
+            st.error("⚠ No GPU detected - Running on CPU (will be very slow)")
     
     # Main content area
     col1, col2 = st.columns([1, 1])
