@@ -35,6 +35,7 @@ class ChatterboxLocal():
         self, text: str, out_path: str, 
         exaggeration: Optional[float] = None, 
         cfg_weight: Optional[float] = None,
+        temperature: Optional[float] = None,
         ref_audio_path: Optional[os.PathLike] = None
         ):
         self.load()
@@ -42,13 +43,14 @@ class ChatterboxLocal():
         ref = ref_audio_path or self.ref_audio_path
         exaggeration = exaggeration or self.exaggeration
         cfg_weight = cfg_weight or self.cfg_weight
+        temperature = temperature or self.temperature
         if self.verbose:
             wav = self.model.generate(
                 text,
                 audio_prompt_path=ref,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
-                temperature=self.temperature
+                temperature=temperature
             )
         else:
             # suppress stdout/stderr and reduce logging noise during generation

@@ -37,10 +37,7 @@ def main():
     
     # Sidebar for settings
     with st.sidebar:
-        st.header("⚙️ Settings")
-        
         # Voice selection
-        st.subheader("Voice Selection")
         available_voices = st.session_state.voice_manager.get_voice_list()
         
         if len(available_voices) > 0:
@@ -49,54 +46,81 @@ def main():
                 options=available_voices,
                 help="Choose a voice from your saved samples, or select 'Model default' for the default TTS voice"
             )
+            
+            # Preview and Delete buttons for custom voices
+            if selected_voice and selected_voice != "Model default":
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📢", help="Preview voice sample", use_container_width=True):
+                        voice_path = st.session_state.voice_manager.get_voice_path(selected_voice)
+                        if voice_path:
+                            st.audio(voice_path, format="audio/wav", autoplay=True)
+                
+                with col2:
+                    with st.popover("🗑️", help="Delete voice", use_container_width=True):
+                        st.write(f"Delete '{selected_voice}'?")
+                        if st.button("Confirm", type="primary", use_container_width=True):
+                            if st.session_state.voice_manager.remove_voice(selected_voice):
+                                st.success("Deleted!")
+                                st.rerun()
+                            else:
+                                st.error("Failed to delete.")
         else:
             st.info("No voices available. Please add a voice sample below or select 'Model default'.")
             selected_voice = None
         
         # Add new voice
-        st.subheader("Add New Voice")
-        voice_name = st.text_input("Voice Name", placeholder="e.g., My Voice")
-        voice_file = st.file_uploader(
-            "Upload Voice Sample (WAV, MP3)",
-            type=["wav", "mp3"],
-            help="Upload a 5-30 second audio clip of the voice you want to clone"
-        )
+        with st.expander("➕ Add New Voice"):
+            voice_name = st.text_input("Voice Name", placeholder="e.g., My Voice")
+            voice_file = st.file_uploader(
+                "Upload Voice Sample",
+                type=["wav", "mp3"],
+                help="Upload a 5-30 second audio clip"
+            )
+            
+            if st.button("Add Voice", use_container_width=True) and voice_name and voice_file:
+                with st.spinner("Adding voice sample..."):
+                    success = st.session_state.voice_manager.add_voice(voice_name, voice_file)
+                    if success:
+                        st.success(f"Voice '{voice_name}' added successfully!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add voice. Please try again.")
         
-        if st.button("Add Voice") and voice_name and voice_file:
-            with st.spinner("Adding voice sample..."):
-                success = st.session_state.voice_manager.add_voice(voice_name, voice_file)
-                if success:
-                    st.success(f"Voice '{voice_name}' added successfully!")
-                    st.rerun()
-                else:
-                    st.error("Failed to add voice. Please try again.")
-        
-        # Exaggeration slider
-        st.subheader("TTS Parameters")
-        exaggeration = st.slider(
-            "Exaggeration",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.6,
-            step=0.05,
-            help="Controls the emotional intensity and expressiveness of the speech"
-        )
-        
-        cfg_weight = st.slider(
-            "CFG Weight",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.5,
-            step=0.05,
-            help="Controls the classifier-free guidance weight for voice generation"
-        )
+        # TTS Parameters
+        with st.expander("🎛️ Advanced TTS Settings"):
+            exaggeration = st.slider(
+                "Exaggeration",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.05,
+                help="Controls the emotional intensity"
+            )
+            
+            cfg_weight = st.slider(
+                "CFG Weight",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.5,
+                step=0.05,
+                help="Controls the classifier-free guidance weight"
+            )
+            
+            temperature = st.slider(
+                "Temperature",
+                min_value=0.0,
+                max_value=2.0,
+                value=0.7,
+                step=0.05,
+                help="Controls the randomness of the output"
+            )
         
         # GPU info
-        st.subheader("System Info")
         if torch.cuda.is_available():
-            st.success(f"✓ GPU Available: {torch.cuda.get_device_name(0)}")
+            st.caption(f"✓ GPU: {torch.cuda.get_device_name(0)}")
         else:
-            st.warning("⚠ No GPU detected. Using CPU (slower)")
+            st.caption("⚠ Using CPU (slower)")
     
     # Main content area
     col1, col2 = st.columns([1, 1])
@@ -166,7 +190,10 @@ def main():
                         with status_container:
                             with st.spinner("🔄 Loading TTS model into memory..."):
                                 # Pass None for ref_audio_path when using "Model default"
-                                tts = ChatterboxLocal(ref_audio_path=voice_path, exaggeration=exaggeration, cfg_weight=cfg_weight)
+                                tts = ChatterboxLocal(ref_audio_path=voice_path, 
+                                                      exaggeration=exaggeration, 
+                                                      cfg_weight=cfg_weight,
+                                                      temperature=temperature)
                                 tts.load()
                         
                         with status_container:
@@ -182,6 +209,8 @@ def main():
                                     audio_path,
                                     ref_audio_path=voice_path,
                                     exaggeration=exaggeration,
+                                    cfg_weight=cfg_weight,
+                                    temperature=temperature,
                                     progress_callback=lambda p: progress_bar.progress(p),
                                     tts=tts
                                 )
