@@ -6,6 +6,7 @@ except (ImportError, SystemError): # for running as __main__ (testing)
 import os
 from typing import Optional
 import tempfile
+import nltk
 from pydub import AudioSegment
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -92,21 +93,13 @@ class QwenTextCleaner:
             )
         
         # Decode the output
-        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Slice the output to get only the new tokens (exclude the prompt)
+        input_length = inputs.input_ids.shape[1]
+        generated_tokens = outputs[0][input_length:]
         
-        # Extract just the assistant's response
-        # The response includes the entire conversation, so we need to extract only the assistant part
-        # This is a simplified approach - in production you might want more sophisticated parsing
-        if "assistant" in response:
-            # Extract the assistant's response
-            assistant_response = response.split("assistant")[-1].strip()
-            # Clean up any remaining special tokens or formatting
-            assistant_response = assistant_response.replace("<|endoftext|>", "").strip()
-        else:
-            # Fallback: if we can't parse properly, return the original text
-            assistant_response = text_chunk
+        response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
         
-        return assistant_response
+        return response.strip()
 
 def clean_text_with_llm(text: str, progress_callback: Optional[callable] = None) -> str:
     """Uses Qwen model directly from Hugging Face to clean text for TTS processing."""
@@ -136,47 +129,59 @@ def clean_text_with_llm(text: str, progress_callback: Optional[callable] = None)
 
 def chunk_text(text: str, max_length: int = 200) -> list:
     """Split text into chunks for processing by the LLM"""
+    try:
+        nltk.data.find('tokenizers/punkt')
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt')
+        nltk.download('punkt_tab')
+
     chunks = []
-    sentences = text.split('. ')
+    sentences = nltk.sent_tokenize(text)
     
-    for i, sentence in enumerate(sentences):
+    current_chunk = ""
+    
+    for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
             continue
             
-        # Add period back if it was split
-        if not sentence.endswith('.'):
-            sentence += '.'
-        
-        if len(sentence) <= max_length: # If sentence fits, try to combine with next sentences
-            if i < len(sentences) - 1:
-                for k in range(i, len(sentences)-1):
-                    if len(sentence) + len(sentences[k+1]) + 1 <= max_length:
-                        sentence += ' ' + sentences[k+1].strip()
-                        
-            chunks.append(sentence)
+        # If adding this sentence exceeds max_length, save current chunk and start new one
+        # (unless current chunk is empty, then we must take it)
+        if current_chunk and len(current_chunk) + len(sentence) + 1 > max_length:
+            chunks.append(current_chunk)
+            current_chunk = sentence
         else:
-            # If sentence is too long, split by words
-            words = sentence.split(' ')
-            current_chunk = []
-            current_length = 0
+            if current_chunk:
+                current_chunk += " " + sentence
+            else:
+                current_chunk = sentence
+                
+        # Handle case where a single sentence is longer than max_length
+        if len(current_chunk) > max_length:
+             # If the current chunk (which might be just one sentence) is too long, split it by words
+            words = current_chunk.split(' ')
+            temp_chunk = []
+            temp_length = 0
             
             for word in words:
-                word_length = len(word) + 1  # +1 for space
-                
-                if current_length + word_length <= max_length:
-                    current_chunk.append(word)
-                    current_length += word_length
+                word_length = len(word) + 1
+                if temp_length + word_length <= max_length:
+                    temp_chunk.append(word)
+                    temp_length += word_length
                 else:
-                    # Add current chunk
-                    if current_chunk:
-                        chunks.append(' '.join(current_chunk))
-                        current_chunk = [word]
-                        current_length = word_length
+                    if temp_chunk:
+                        chunks.append(' '.join(temp_chunk))
+                    temp_chunk = [word]
+                    temp_length = word_length
             
-            # Add any remaining words
-            if current_chunk:
-                chunks.append(' '.join(current_chunk))
+            if temp_chunk:
+                current_chunk = ' '.join(temp_chunk)
+            else:
+                current_chunk = ""
+                
+    if current_chunk:
+        chunks.append(current_chunk)
     
     return chunks
 
@@ -185,33 +190,47 @@ def text2audio(
     out_path: os.PathLike, 
     ref_audio_path: Optional[os.PathLike] = None, 
     exaggeration: Optional[float] = None,
+    cfg_weight: Optional[float] = None,
+    temperature: Optional[float] = None,
     progress_callback: Optional[callable] = None,
     tts=None
     ) -> str:
     """Chunk text into small segments, generate audio for each segment, and combine into a single audio file.
     """
     if not tts:
-        tts = ChatterboxLocal(ref_audio_path=ref_audio_path, exaggeration=exaggeration)
+        tts = ChatterboxLocal(ref_audio_path=ref_audio_path, 
+                              exaggeration=exaggeration,
+                              cfg_weight=cfg_weight,
+                              temperature=temperature)
     
     tts.load()
     
     lines = chunk_text(text)
     
-    # Create a temporary directory to store chunk audio files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        chunk_files = []
-        for i, line in enumerate(lines):
-            if progress_callback:
-                progress_callback((i + 1) / len(lines))
-            chunk_out_path = os.path.join(temp_dir, f"chunk_{i}.wav")
-            tts.generate(text=line, out_path=chunk_out_path, ref_audio_path=ref_audio_path, exaggeration=exaggeration)
-            chunk_files.append(chunk_out_path)
+    # Generate audio chunks in memory and combine them
+    segments = []
+    silence = AudioSegment.silent(duration=500)
+    
+    for i, line in enumerate(lines):
+        if progress_callback:
+            progress_callback((i + 1) / len(lines))
+            
+        # Generate audio in memory (returns BytesIO)
+        audio_buffer = tts.generate(text=line,
+                                    out_path=None,
+                                    ref_audio_path=ref_audio_path,
+                                    exaggeration=exaggeration,
+                                    cfg_weight=cfg_weight,
+                                    temperature=temperature)
         
-        # Combine chunk audio files into one
-        combined = AudioSegment.empty()
-        for chunk_file in chunk_files:
-                chunk_audio = AudioSegment.from_wav(chunk_file)
-                combined += chunk_audio + AudioSegment.silent(duration=500)  # Add 0.5s silence between chunks
+        # Create AudioSegment from memory buffer
+        chunk_audio = AudioSegment.from_wav(audio_buffer)
+        segments.append(chunk_audio + silence)
+
+        if segments:
+            combined = sum(segments, AudioSegment.empty())
+        else:
+            combined = AudioSegment.empty()
         
         # Export combined audio
         combined.export(out_path, format="wav")

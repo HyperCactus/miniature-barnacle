@@ -1,8 +1,9 @@
 import os
+import io
 import torchaudio as ta
 from chatterbox.tts import ChatterboxTTS
 import torch
-from typing import Optional
+from typing import Optional, Union
 from contextlib import redirect_stdout, redirect_stderr
 import logging
 
@@ -32,12 +33,12 @@ class ChatterboxLocal():
             self.model = ChatterboxTTS.from_pretrained(device=self.device)
 
     def generate(
-        self, text: str, out_path: str, 
-        exaggeration: Optional[float] = None, 
+        self, text: str, out_path: Optional[str] = None,
+        exaggeration: Optional[float] = None,
         cfg_weight: Optional[float] = None,
         temperature: Optional[float] = None,
         ref_audio_path: Optional[os.PathLike] = None
-        ):
+        ) -> Union[str, io.BytesIO]:
         self.load()
         # If there’s no ref, pass None so chatterbox skips voice cloning path
         ref = ref_audio_path or self.ref_audio_path
@@ -72,13 +73,28 @@ class ChatterboxLocal():
         # Ensure 2D [channels, time] on CPU for torchaudio
         if wav.dim() == 1:
             wav = wav.unsqueeze(0)
-        ta.save(
-            out_path,
-            wav.to("cpu"),
-            self.model.sr,
-            encoding="PCM_S",
-            bits_per_sample=16
-        )
+        
+        if out_path:
+            ta.save(
+                out_path,
+                wav.to("cpu"),
+                self.model.sr,
+                encoding="PCM_S",
+                bits_per_sample=16
+            )
+            return out_path
+        else:
+            buffer = io.BytesIO()
+            ta.save(
+                buffer,
+                wav.to("cpu"),
+                self.model.sr,
+                format="wav",
+                encoding="PCM_S",
+                bits_per_sample=16
+            )
+            buffer.seek(0)
+            return buffer
 
     def unload(self):
         self.model = None

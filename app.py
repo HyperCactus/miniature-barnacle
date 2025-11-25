@@ -6,6 +6,7 @@ from src.doc_reader import text2audio, clean_text_with_llm
 from src.voice_manager import VoiceManager
 import tempfile
 import os
+from werkzeug.utils import secure_filename
 
 # Configure page
 st.set_page_config(
@@ -209,7 +210,8 @@ def main():
                                 
                                 # Create a persistent directory for audio files
                                 os.makedirs("generated_audio", exist_ok=True)
-                                audio_path = os.path.join("generated_audio", f"{uploaded_file.name.rsplit('.', 1)[0]}_audio.wav")
+                                safe_filename = secure_filename(uploaded_file.name)
+                                audio_path = os.path.join("generated_audio", f"{safe_filename.rsplit('.', 1)[0]}_audio.wav")
                                 
                                 st.session_state.tts_engine(
                                     text,
