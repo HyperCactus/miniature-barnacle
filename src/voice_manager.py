@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 from pydub import AudioSegment
+from filelock import FileLock
 
 
 class VoiceManager:
@@ -25,23 +26,26 @@ class VoiceManager:
         self.voices_dir.mkdir(exist_ok=True)
         
         self.metadata_file = self.voices_dir / "voices.json"
+        self.lock_file = self.voices_dir / "voices.json.lock"
         self.metadata = self._load_metadata()
     
     def _load_metadata(self) -> dict:
         """Load voice metadata from JSON file."""
-        if self.metadata_file.exists():
-            try:
-                with open(self.metadata_file, 'r') as f:
-                    return json.load(f)
-            except Exception:
-                return {}
-        return {}
+        with FileLock(self.lock_file):
+            if self.metadata_file.exists():
+                try:
+                    with open(self.metadata_file, 'r') as f:
+                        return json.load(f)
+                except Exception:
+                    return {}
+            return {}
     
     def _save_metadata(self):
         """Save voice metadata to JSON file."""
         try:
-            with open(self.metadata_file, 'w') as f:
-                json.dump(self.metadata, f, indent=2)
+            with FileLock(self.lock_file):
+                with open(self.metadata_file, 'w') as f:
+                    json.dump(self.metadata, f, indent=2)
         except Exception as e:
             raise RuntimeError(f"Failed to save metadata: {str(e)}")
     

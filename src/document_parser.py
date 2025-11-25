@@ -9,6 +9,7 @@ from typing import Union
 import PyPDF2
 from docx import Document
 import markdown
+from bs4 import BeautifulSoup
 
 
 def parse_pdf(file_obj) -> str:
@@ -88,13 +89,14 @@ def parse_markdown(file_obj) -> str:
         # We'll use the markdown library to convert to HTML, then strip tags
         html = markdown.markdown(content)
         
-        # Simple HTML tag removal
-        import re
-        text = re.sub('<[^<]+?>', '', html)
-        text = re.sub('&nbsp;', ' ', text)
-        text = re.sub('&lt;', '<', text)
-        text = re.sub('&gt;', '>', text)
-        text = re.sub('&amp;', '&', text)
+        # Use BeautifulSoup for robust HTML stripping
+        soup = BeautifulSoup(html, "html.parser")
+        
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+            
+        text = soup.get_text()
         
         return text
     except Exception as e:
@@ -145,7 +147,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'[ \t]+', ' ', text)
     
     # Remove page numbers and headers/footers patterns
-    text = re.sub(r'\n\d+\n', '\n', text)
+    # text = re.sub(r'\n\d+\n', '\n', text)  # Too aggressive, removing valid numbers
     
     # Fix common OCR errors and formatting issues
     text = re.sub(r'([a-z])- ([a-z])', r'\1\2', text)  # Fix hyphenated words
