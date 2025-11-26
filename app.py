@@ -5,8 +5,6 @@ from src.tts_gen_chaterbox_local import ChatterboxLocal
 from src.doc_reader import text2audio, clean_text_with_llm
 from src.voice_manager import VoiceManager
 import tempfile
-import os
-from werkzeug.utils import secure_filename
 
 # Configure page
 st.set_page_config(
@@ -117,6 +115,14 @@ def main():
                 help="Controls the randomness of the output"
             )
         
+        # Text Processing Options
+        st.markdown("### 📝 Text Processing")
+        clean_text_llm = st.checkbox(
+            "Clean text with LLM",
+            value=False,
+            help="Use local LLM to clean text (slower). Recommended for imperfectly formatted documents."
+        )
+        
         # GPU info
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
@@ -170,27 +176,28 @@ def main():
                             st.error("No text found in the document!")
                     else:
                         # Load LLM model and clean text
-                        with status_container:
-                            with st.spinner("🔄 Loading LLM into memory..."):
-                                # Import the cleaner class to preload the model
-                                from src.doc_reader import QwenTextCleaner
-                                cleaner = QwenTextCleaner()
-                                cleaner.load()
-                            
-                            with st.spinner("🧠 Cleaning text with LLM..."):
-                                llm_progress_bar = st.progress(0.0)
-                                # Clean text with the preloaded model
-                                chunks = text.split('. ')
-                                cleaned_chunks = []
-                                for i, chunk in enumerate(chunks):
-                                    if chunk.strip():
-                                        cleaned_chunk = cleaner.clean_chunk(chunk)
-                                        cleaned_chunks.append(cleaned_chunk)
-                                    llm_progress_bar.progress((i + 1) / len(chunks))
-                                text = '. '.join(cleaned_chunks)
-                                llm_progress_bar.empty()  # Clear the progress bar
-                                st.success("✓ Text cleaned successfully!")
-                                cleaner.unload()  # Unload the LLM model to free memory
+                        if clean_text_llm:
+                            with status_container:
+                                with st.spinner("🔄 Loading LLM into memory..."):
+                                    # Import the cleaner class to preload the model
+                                    from src.doc_reader import QwenTextCleaner
+                                    cleaner = QwenTextCleaner()
+                                    cleaner.load()
+                                
+                                with st.spinner("🧠 Cleaning text with LLM..."):
+                                    llm_progress_bar = st.progress(0.0)
+                                    # Clean text with the preloaded model
+                                    chunks = text.split('. ')
+                                    cleaned_chunks = []
+                                    for i, chunk in enumerate(chunks):
+                                        if chunk.strip():
+                                            cleaned_chunk = cleaner.clean_chunk(chunk)
+                                            cleaned_chunks.append(cleaned_chunk)
+                                        llm_progress_bar.progress((i + 1) / len(chunks))
+                                    text = '. '.join(cleaned_chunks)
+                                    llm_progress_bar.empty()  # Clear the progress bar
+                                    st.success("✓ Text cleaned successfully!")
+                                    cleaner.unload()  # Unload the LLM model to free memory
                         
                         # Generate audio
                         voice_path = st.session_state.voice_manager.get_voice_path(selected_voice)
@@ -208,10 +215,9 @@ def main():
                             with st.spinner("🎵 Generating audio... This may take a while for long documents."):
                                 progress_bar = st.progress(0.0)
                                 
-                                # Create a persistent directory for audio files
-                                os.makedirs("generated_audio", exist_ok=True)
-                                safe_filename = secure_filename(uploaded_file.name)
-                                audio_path = os.path.join("generated_audio", f"{safe_filename.rsplit('.', 1)[0]}_audio.wav")
+                                # Create a temporary file for audio
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+                                    audio_path = tmp_file.name
                                 
                                 st.session_state.tts_engine(
                                     text,
