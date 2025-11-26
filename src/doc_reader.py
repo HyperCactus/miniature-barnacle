@@ -14,7 +14,8 @@ from transformers import BitsAndBytesConfig
 import gc
 
 # System prompt from the original CleanText docstring
-SYSTEM_PROMPT = """Fix any obvious issues in the text and write everything out exactly how it should be pronounced.
+SYSTEM_PROMPT = """Fix any obvious issues in the text such as typos or transcription/formatting problems,
+and write everything out exactly how it should be spoken.
 For example, 22 + 1/40 should be written as "twenty two plus one over forty".
 Exclude any text that should not be spoken such as image captions, references etc.
 Reply only with the exact text to be spoken, do not include any additional commentary."""
