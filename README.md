@@ -1,4 +1,7 @@
 # Miniature Barnacle - Local Document to Audio Converter
+A clean and simple GUI to convert documents to high-quality audio for free on your local machine.
+
+![Miniature Barnacle UI](demo_images/image.png)
 
 ## About
 Proprietary cloud-based TTS services exist that allow you to upload a document and have it converted to high-quality audio, but they are often expensive and lack privacy. **Miniature Barnacle** is a fully free, open-source project that performs high-quality, natural-sounding Text-to-Speech (TTS) on entire documents completely locally.
